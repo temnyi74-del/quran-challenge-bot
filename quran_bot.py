@@ -15,11 +15,12 @@ TZ = pytz.timezone(os.getenv("TIMEZONE", "Asia/Yekaterinburg"))
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# --- Реакция на фото в нужной группе ---
+# --- Реакция на фото в вашей группе ---
 @dp.message()
 async def handle_message(message: types.Message):
     if message.chat.id == GROUP_ID and message.photo:
-        await message.reply(f"МашаАллах, {message.from_user.first_name}! Аллах примет 🤲")
+        name = message.from_user.full_name or message.from_user.first_name or "друг"
+        await message.reply(f"МашаАллах, {name}! Аллах примет 🤲")
 
 # --- Ежедневное напоминание 23:59 по Челябинску ---
 async def reminder():
@@ -30,7 +31,10 @@ async def reminder():
             target += timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
         try:
-            await bot.send_message(GROUP_ID, "Сегодня не все отметились 😔 Пусть Коран будет светом сердец 🤲")
+            await bot.send_message(
+                GROUP_ID,
+                "Сегодня не все отметились 😔 Пусть Коран будет светом наших сердец 🤲"
+            )
         except Exception as e:
             logging.error(f"Reminder error: {e}")
 
