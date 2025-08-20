@@ -296,7 +296,7 @@ async def autopinger():
             logging.warning(f"Ping failed: {e}")
         await asyncio.sleep(300)  # каждые 5 минут
 
-# ── MAIN ───────────────────────────────────────────────────────────────────────
+# --- MAIN
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
@@ -305,12 +305,13 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
 
     # сервисные задачи
-    asyncio.create_task(run_web_server())  # чтобы был открытый порт
+    asyncio.create_task(run_web_server())   # просто держит порт открыт
     asyncio.create_task(scheduler_23_00())
     asyncio.create_task(autopinger())
 
-    # запуск поллинга Telegram
+    # запускаем polling
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
