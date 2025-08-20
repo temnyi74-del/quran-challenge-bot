@@ -1,7 +1,8 @@
 import asyncio, logging, os
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from datetime import datetime, timedelta
+from aiogram.utils import executor
+from aiogram.client.default import DefaultBotProperties
 import pytz
 
 # Берём переменные из окружения Render
@@ -9,7 +10,10 @@ TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 TZ = pytz.timezone(os.getenv("TIMEZONE", "Asia/Yekaterinburg"))
 
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher()
 
 # Реакция на фото
