@@ -304,6 +304,10 @@ async def main():
     asyncio.create_task(run_web_server())  # чтобы был открытый порт
     asyncio.create_task(scheduler_23_00())
     asyncio.create_task(autopinger())
+
+    # сбрасываем вебхук (чтобы не было конфликта с polling)
+    await bot.delete_webhook(drop_pending_updates=True)
+
     # запуск поллинга Telegram
     await dp.start_polling(bot)
 
