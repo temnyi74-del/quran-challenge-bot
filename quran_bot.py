@@ -56,7 +56,9 @@ motivation_index = 0
 # ==== Реакция на фото ====
 @dp.message(F.photo)
 async def handle_photo(message: Message):
-    await message.reply("بارك الله فيك! Пусть Аллаh примет, آمين 🤲")
+    await message.reply("!بارك الله فيك 
+    Пусть Аллаh примет, 
+    آمين 🤲")
 
 # ==== Планировщик мотивашек ====
 async def send_motivation():
