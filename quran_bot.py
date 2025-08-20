@@ -9,11 +9,11 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode, ChatType
 from aiogram.client.default import DefaultBotProperties
 
-# ── CONFIG ───────────────────────────────
+# ── ENV ────────────────────────────────────────────────────────────────────────
 TOKEN: str = os.getenv("BOT_TOKEN", "")
 GROUP_ID: int = int(os.getenv("GROUP_ID", "0"))
 TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Yekaterinburg")   # Челябинск
-ROSTER_RAW: str = os.getenv("ROSTER_USERNAMES", "")           # "user1,user2,...", без @
+ROSTER_RAW: str = os.getenv("ROSTER_USERNAMES", "")           # "user1,user2", без @
 
 if not TOKEN or not GROUP_ID:
     raise SystemExit("Set BOT_TOKEN and GROUP_ID environment variables.")
@@ -26,11 +26,11 @@ def _parse_roster(raw: str) -> Set[str]:
 
 ROSTER: Set[str] = _parse_roster(ROSTER_RAW)
 
-# ── BOT / DP ─────────────────────────────
+# ── BOT / DP ───────────────────────────────────────────────────────────────────
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp  = Dispatcher()
 
-# ── DB ───────────────────────────────────
+# ── DB ─────────────────────────────────────────────────────────────────────────
 DB_PATH = "quran.sqlite3"
 
 async def init_db():
@@ -39,7 +39,9 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS participants (
             user_id      INTEGER PRIMARY KEY,
             first_name   TEXT,
-            username     TEXT
+            username     TEXT,
+            private_chat INTEGER DEFAULT 0,  -- /start в ЛС (сейчас не используем)
+            is_active    INTEGER DEFAULT 1
         )""")
         await db.execute("""
         CREATE TABLE IF NOT EXISTS reports (
@@ -53,6 +55,7 @@ def today_str() -> str:
     return datetime.now(TZ).strftime("%Y-%m-%d")
 
 def mention(user_id: int, first_name: Optional[str], username: Optional[str]) -> str:
+    """Кликабельное упоминание: @username если есть, иначе tg:// по id."""
     if username:
         return f"@{username}"
     safe = (first_name or "участник").replace("<","").replace(">","")
@@ -74,35 +77,66 @@ async def add_report(user_id: int, date: str):
         await db.execute("INSERT OR IGNORE INTO reports(user_id, date) VALUES(?,?)", (user_id, date))
         await db.commit()
 
-async def get_participants() -> List[Tuple[int,str,Optional[str]]]:
+async def get_participants(active_only=True) -> List[Tuple[int,str,Optional[str],int,int]]:
+    q = "SELECT user_id, first_name, username, private_chat, is_active FROM participants"
+    if active_only:
+        q += " WHERE is_active=1"
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT user_id, first_name, username FROM participants") as cur:
+        async with db.execute(q) as cur:
             return await cur.fetchall()
 
-async def get_reported_ids_for(date: str) -> Set[int]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT user_id FROM reports WHERE date=?", (date,)) as cur:
-            return {r[0] for r in await cur.fetchall()}
+async def get_username_map() -> Dict[str, Tuple[int,str,Optional[str],int,int]]:
+    """username(lower) -> (user_id, first_name, username, private_chat, is_active)"""
+    rows = await get_participants(active_only=False)
+    out: Dict[str, Tuple[int,str,Optional[str],int,int]] = {}
+    for u, fn, un, pm, act in rows:
+        if un:
+            out[un.lower()] = (u, fn, un, pm, act)
+    return out
 
-# ── HANDLERS ─────────────────────────────
+async def get_reported_usernames_for(date: str) -> Set[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+        SELECT p.username
+        FROM reports r
+        JOIN participants p ON p.user_id = r.user_id
+        WHERE r.date=? AND p.username IS NOT NULL
+        """, (date,)) as cur:
+            rows = await cur.fetchall()
+    return {un.lower() for (un,) in rows if un}
+
+# ── HANDLERS ───────────────────────────────────────────────────────────────────
 @dp.message(F.chat.id == GROUP_ID)
-async def track(message: types.Message):
-    """Любое сообщение в группе → запоминаем участника."""
+async def track_participants(message: types.Message):
+    """Любое сообщение в группе — запоминаем участника (чтобы упоминать кликабельно)."""
     if message.from_user:
         await ensure_participant(message.from_user)
 
 @dp.message(F.chat.id == GROUP_ID, F.photo)
 async def mark_report(message: types.Message):
-    """Фото = отчёт за сегодня."""
+    """Фото в группе = отчёт за сегодня."""
     if message.from_user:
         await ensure_participant(message.from_user)
         await add_report(message.from_user.id, today_str())
-        name = message.from_user.full_name or message.from_user.first_name or "брат"
-        await message.reply(f"МашаАллах, {name}! Аллах примет 🤲")
+        name = message.from_user.full_name or message.from_user.first_name or "друг"
+        await message.reply(f"МашаАллах, {name}! Аллах примет")
 
-# ── MOTIVATION ───────────────────────────
+@dp.message(F.chat.id == GROUP_ID, F.text == "/missed")
+async def cmd_missed(message: types.Message):
+    """Быстрая проверка, кого нет сегодня (только по БД участников/отчётов)."""
+    rows = await get_participants(active_only=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM reports WHERE date=?", (today_str(),)) as cur:
+            reported_ids = {r[0] for r in await cur.fetchall()}
+    missed = [r for r in rows if r[0] not in reported_ids]
+    if not missed:
+        return await message.reply("Сегодня все отметились. МашаАллах!")
+    lst = ", ".join([mention(u, fn, un) for (u, fn, un, _, _) in missed])
+    await message.reply(f"Сегодня ещё нет отчёта: {lst}")
+
+# ── MOTIVATION (30 фраз) ───────────────────────────────────────────────────────
 AYAT_ROTATION = [
-    "Читайте Коран, братья, ибо он придёт заступником в Судный день.",
+    "Читайте Коран, братья, ибо он придёт заступником в Судный день для своих обладателей.",
     "Лучшие из вас — те, кто изучает Коран и обучает ему.",
     "Поистине, в поминании Аллаха сердца находят успокоение (13:28).",
     "Коран — свет и руководство. Удели ему хотя бы десять страниц сегодня.",
@@ -135,46 +169,85 @@ AYAT_ROTATION = [
 ]
 
 def daily_headline() -> str:
-    day = int(datetime.now(TZ).strftime("%d"))
+    day = int(datetime.now(TZ).strftime("%d"))  # 1..31
     return AYAT_ROTATION[(day - 1) % len(AYAT_ROTATION)]
 
-# ── DAILY REMINDER ───────────────────────
-async def send_daily_reminder():
-    participants = await get_participants()
-    reported_ids = await get_reported_ids_for(today_str())
+# ── DAILY REMINDER @ 23:00 ─────────────────────────────────────────────────────
+async def send_daily_reminders():
+    roster = set(ROSTER)                              # usernames (lower)
+    uname_map = await get_username_map()              # username -> profile
+    reported_unames = await get_reported_usernames_for(today_str())
 
-    missed = [p for p in participants if p[0] not in reported_ids]
+    # если ростер пуст — берём всех активных, кто писал когда‑либо
+    if not roster:
+        parts = await get_participants(active_only=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT user_id FROM reports WHERE date=?", (today_str(),)) as cur:
+                reported_ids = {r[0] for r in await cur.fetchall()}
+        missed_rows = [p for p in parts if p[0] not in reported_ids]
+        if not missed_rows:
+            try: await bot.send_message(GROUP_ID, "Сегодня все отметились. МашаАллах!")
+            except Exception: pass
+        else:
+            lst = ", ".join([mention(u, fn, un) for (u, fn, un, _, _) in missed_rows])
+            head = daily_headline()
+            try: await bot.send_message(GROUP_ID, f"{head}\nСегодня ещё не отметились: {lst}")
+            except Exception: pass
+        # чистим старые отчёты
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM reports WHERE date < ?", (today_str(),))
+            await db.commit()
+        return
 
-    # добавляем молчунов из ROSTER
-    missed_usernames = set(un.lower() for _, _, un in missed if un)
-    roster_missed = [f"@{un}" for un in ROSTER if un not in missed_usernames]
-
-    if not missed and not roster_missed:
-        text = "Сегодня все отметились. МашаАллах!"
+    # есть фиксированный список username
+    missed_unames = sorted(roster - reported_unames)
+    if not missed_unames:
+        try: await bot.send_message(GROUP_ID, "Сегодня все из списка отметились. МашаАллах!")
+        except Exception: pass
     else:
-        tags = [mention(u, fn, un) for (u, fn, un) in missed]
-        tags += roster_missed
-        text = f"{daily_headline()}\nСегодня ещё не отметились: " + ", ".join(tags)
+        head = daily_headline()
+        tags = []
+        for uname in missed_unames:
+            profile = uname_map.get(uname)
+            if profile:
+                user_id, first_name, username, _, _ = profile
+                tags.append(mention(user_id, first_name, username))
+            else:
+                tags.append(f"@{uname}")  # молчун с username, ещё не писал в группе
+        text = f"{head}\nСегодня ещё не отметились: " + ", ".join(tags)
+        try: await bot.send_message(GROUP_ID, text)
+        except Exception: pass
 
-    try:
-        await bot.send_message(GROUP_ID, text)
-    except Exception as e:
-        logging.error(f"Reminder send error: {e}")
+    # чистим старые отчёты
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM reports WHERE date < ?", (today_str(),))
+        await db.commit()
 
 async def scheduler_23_00():
+    """Триггер каждый день в 23:00 (Челябинск)."""
     while True:
         now = datetime.now(TZ)
         target = now.replace(hour=23, minute=0, second=0, microsecond=0)
         if target <= now:
-            target += timedelta(days=1)
+            target = target + timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
-        await send_daily_reminder()
+        try:
+            await send_daily_reminders()
+        except Exception as e:
+            logging.exception(f"Daily reminder error: {e}")
 
-# ── MAIN ─────────────────────────────────
+# ── MAIN ───────────────────────────────────────────────────────────────────────
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
+
+    # критично: выключаем webhook, чтобы точно не было конфликта
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    # фоновые задачи
     asyncio.create_task(scheduler_23_00())
+
+    # запускаем polling (единственный способ получения апдейтов)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
