@@ -29,11 +29,7 @@ dp = Dispatcher()
 @dp.message(F.chat.id == GROUP_ID, F.photo)
 async def handle_photo(message: Message):
     try:
-        await message.answer("بارك الله فيك")
-        await asyncio.sleep(0.5)
-        await message.answer("Пусть Аллаh примет,")
-        await asyncio.sleep(0.5)
-        await message.answer("آمين 🤲")
+        await message.answer("بارك الله فيك\nПусть Аллах примет,\nآمين 🤲")
     except Exception as e:
         logger.error(f"Ошибка при обработке фото: {e}")
 
