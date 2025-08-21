@@ -119,21 +119,28 @@ async def main():
     await dp.start_polling(bot)
 
 # == HTTP-сервер для Render, чтобы бот не засыпал ==
+from aiohttp import web  # убедись, что импорт есть выше, либо вставь здесь
+
 async def handle(request):
     return web.Response(text="Bot is alive")
 
-def start_web():
+async def start_web():
     app = web.Application()
     app.router.add_get("/", handle)
-    web.run_app(app, port=int(os.environ.get("PORT", 8080)))
-    
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    site = web.TCPSite(runner, port=int(os.environ.get("PORT", 8080)))
+    await site.start()
+
+# == Основной запуск ==
+async def main():
+    await start_web()              # запуск веб-сервера
+    await dp.start_polling(bot)   # запуск бота
+
 if __name__ == "__main__":
     try:
-        # Запускаем HTTP-сервер в отдельном потоке (чтобы Render не усыплял)
-        from threading import Thread
-        Thread(target=start_web).start()
-
-        # Запускаем Telegram-бота
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Бот остановлен")
