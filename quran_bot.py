@@ -8,26 +8,34 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
 # ── Логирование ─────────────────────────────────
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ── Конфиг ──────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")                 # токен бота
-GROUP_ID  = int(os.getenv("GROUP_ID", "0"))        # id группы (со знаком -100...)
+GROUP_ID = int(os.getenv("GROUP_ID", "0"))         # id группы (со знаком -100...)
 TIMEZONE_OFFSET = int(os.getenv("TZ_OFFSET", "5")) # смещение от UTC, напр. Челябинск = +5
 
 if not BOT_TOKEN or GROUP_ID == 0:
     raise RuntimeError("Нужно задать BOT_TOKEN и GROUP_ID в переменных окружения.")
 
 bot = Bot(token=BOT_TOKEN)
-dp  = Dispatcher()
+dp = Dispatcher()
 
 # ── Реакция только на фото в нужной группе ─────
 @dp.message(F.chat.id == GROUP_ID, F.photo)
 async def handle_photo(message: Message):
-    # построчно, как просил
-    await message.answer("بارك الله فيك")
-    await message.answer("Пусть Аллаh примет,")
-    await message.answer("آمين 🤲")
+    try:
+        await message.answer("بارك الله فيك")
+        await asyncio.sleep(0.5)
+        await message.answer("Пусть Аллаh примет,")
+        await asyncio.sleep(0.5)
+        await message.answer("آمين 🤲")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке фото: {e}")
 
 # ── 30 мотивашек (фиксированный порядок, по одной в день) ──
 MOTIVATIONS = [
@@ -70,35 +78,54 @@ def local_now() -> datetime:
 def next_time(hour: int, minute: int = 0) -> datetime:
     """Ближайшее локальное время H:M от текущего момента."""
     now = local_now()
-    target = datetime.combine(now.date(), time(hour, minute))
+    target = datetime(now.year, now.month, now.day, hour, minute)
     if now >= target:
         target += timedelta(days=1)
     return target
 
 def rotation_index_for_day(d: datetime) -> int:
     """Индекс мотивашки: стабильный по дню, идём по порядку, потом цикл."""
-    return (d.date().toordinal()) % len(MOTIVATIONS)
+    return d.toordinal() % len(MOTIVATIONS)
 
 async def daily_motivation_loop():
     """Каждый день в 22:00 по локальному смещению отправляем мотивашку №i."""
     while True:
-        target = next_time(22, 0)  # 22:00 локально
-        sleep_sec = (target - local_now()).total_seconds()
-        await asyncio.sleep(max(0, sleep_sec))
-
-        idx = rotation_index_for_day(target)
-        text = MOTIVATIONS[idx]
         try:
+            target = next_time(22, 0)  # 22:00 локально
+            sleep_sec = (target - local_now()).total_seconds()
+            logger.info(f"Следующая мотивация будет отправлена в {target}, через {sleep_sec} секунд")
+            
+            await asyncio.sleep(max(0, sleep_sec))
+
+            idx = rotation_index_for_day(local_now())
+            text = MOTIVATIONS[idx]
+            
             await bot.send_message(GROUP_ID, text)
+            logger.info(f"Отправлена мотивация #{idx+1}")
+            
+            # Ждём до следующего дня
+            await asyncio.sleep(60)  # небольшая задержка перед следующей проверкой
         except Exception as e:
-            logging.error(f"Не удалось отправить мотивашку: {e}")
+            logger.error(f"Ошибка в цикле мотивации: {e}")
+            await asyncio.sleep(3600)  # ждём час при ошибке
+
+# ── Обработка команды /start ───────────────────
+@dp.message(F.chat.type == "private", F.text == "/start")
+async def start_command(message: Message):
+    await message.answer("Ассаламу алейкум! Я бот для напоминаний о чтении Корана.")
 
 # ── Запуск ─────────────────────────────────────
 async def main():
+    logger.info("Запуск бота...")
     # Планировщик мотивашек
     asyncio.create_task(daily_motivation_loop())
     # Старт поллинга
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
