@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, time, timezone
-
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
@@ -118,8 +118,22 @@ async def main():
     # Старт поллинга
     await dp.start_polling(bot)
 
+# == HTTP-сервер для Render, чтобы бот не засыпал ==
+async def handle(request):
+    return web.Response(text="Bot is alive")
+
+def start_web():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    web.run_app(app, port=int(os.environ.get("PORT", 8080)))
+    
 if __name__ == "__main__":
     try:
+        # Запускаем HTTP-сервер в отдельном потоке (чтобы Render не усыплял)
+        from threading import Thread
+        Thread(target=start_web).start()
+
+        # Запускаем Telegram-бота
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Бот остановлен")
