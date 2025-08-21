@@ -3,8 +3,7 @@ import logging
 import os
 from datetime import datetime, time, timedelta
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, types, F
 
 logging.basicConfig(level=logging.INFO)
 
