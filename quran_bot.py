@@ -54,11 +54,13 @@ MOTIVATIONS = [
 motivation_index = 0
 
 # ==== Реакция на фото ====
-@dp.message(F.photo)
-async def handle_photo(message: Message):
-    await message.reply("!بارك الله فيك 
-    Пусть Аллаh примет, 
-    آمين 🤲")
+@dp.message()
+async def handle_message(message: types.Message):
+    if message.chat.id == GROUP_ID and message.photo:
+        name = message.from_user.full_name or message.from_user.first_name or "брат"
+        await message.reply(f"""بارك الله فيك 
+Пусть Аллаh примет, 
+آمين 🤲""")
 
 # ==== Планировщик мотивашек ====
 async def send_motivation():
