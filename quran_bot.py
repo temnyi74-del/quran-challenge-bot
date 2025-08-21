@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
@@ -73,12 +73,12 @@ MOTIVATIONS = [
 
 def local_now() -> datetime:
     """Текущее время по твоему смещению (UTC+OFFSET)."""
-    return datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+    return datetime.now(timezone.utc) + timedelta(hours=TIMEZONE_OFFSET)
 
 def next_time(hour: int, minute: int = 0) -> datetime:
     """Ближайшее локальное время H:M от текущего момента."""
     now = local_now()
-    target = datetime(now.year, now.month, now.day, hour, minute)
+    target = datetime(now.year, now.month, now.day, hour, minute, tzinfo=now.tzinfo)
     if now >= target:
         target += timedelta(days=1)
     return target
