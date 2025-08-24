@@ -125,15 +125,23 @@ async def start_web():
     await site.start()
 
 # === Основной запуск ===
+# == Основной запуск ==
 async def main():
-    logger.info("Бот запускается...")
-    await start_web()
-    asyncio.create_task(daily_motivation_loop())
-    asyncio.create_task(fasting_reminder_loop())
-    await dp.start_polling(bot)
+    logger.info("Бот запускается...")
+    
+    # Планировщик мотивашек и напоминаний
+    asyncio.create_task(daily_motivation_loop())
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Бот остановлен")
+    # HTTP-сервер, чтобы Render не "усыплял" бота
+    asyncio.create_task(start_web())
+
+    # Запуск поллинга Telegram-бота
+    await dp.start_polling(bot)
+
+if name == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
