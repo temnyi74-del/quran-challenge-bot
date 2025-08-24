@@ -1,127 +1,116 @@
 # quran_bot.py
+
 import asyncio
 import logging
 import os
-from datetime import datetime, timedelta, time, timezone
+import random
+from datetime import datetime, timedelta, timezone
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 
-# ── Логирование ─────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# === Конфигурация ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GROUP_ID = int(os.getenv("GROUP_ID", "0"))
+TIMEZONE_OFFSET = int(os.getenv("TZ_OFFSET", "5"))  # Челябинск = UTC+5
 
-# ── Конфиг ──────────────────────────────────────
-BOT_TOKEN = os.getenv("BOT_TOKEN")                 # токен бота
-GROUP_ID = int(os.getenv("GROUP_ID", "0"))         # id группы (со знаком -100...)
-TIMEZONE_OFFSET = int(os.getenv("TZ_OFFSET", "5")) # смещение от UTC, напр. Челябинск = +5
+PRAISES_URL = "https://raw.githubusercontent.com/temnyi74-del/quran-challenge-bot/main/quran_praise_messages.txt"
+MOTIVATIONS_URL = "https://raw.githubusercontent.com/temnyi74-del/quran-challenge-bot/refs/heads/main/motivations.txt"
 
 if not BOT_TOKEN or GROUP_ID == 0:
     raise RuntimeError("Нужно задать BOT_TOKEN и GROUP_ID в переменных окружения.")
 
+# === Настройка логирования ===
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ── Реакция только на фото в нужной группе ─────
+# === Функции загрузки текстов с GitHub ===
+async def load_blocks_from_url(url):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    blocks = [block.strip() for block in text.split("\n\n") if block.strip()]
+                    return blocks
+                else:
+                    logging.warning(f"Не удалось загрузить данные: {url}. Код: {response.status}")
+                    return []
+    except Exception as e:
+        logging.warning(f"Ошибка при загрузке {url}: {e}")
+        return []
+
+# === Обработка фото в группе ===
 @dp.message(F.chat.id == GROUP_ID, F.photo)
 async def handle_photo(message: Message):
     try:
-        text = "بارك الله فيك\nПусть Аллах примет,\nآمين 🙌"
-        await message.answer(text, reply_to_message_id=message.message_id)
+        praises = await load_blocks_from_url(PRAISES_URL)
+        if praises:
+            praise = random.choice(praises)
+            await message.answer(praise, reply_to_message_id=message.message_id)
     except Exception as e:
         logger.error(f"Ошибка при обработке фото: {e}")
 
-# ── 30 мотивашек (фиксированный порядок, по одной в день) ──
-MOTIVATIONS = [
-    "Сегодня не все отметились. Давайте завтра будем активнее, ин ша Аллах!",
-    "Не забывайте про чтение Корана — это свет в сердце.",
-    "Аллах любит тех, кто старается ради Него.",
-    "Кто держится за Коран — тот никогда не заблудится.",
-    "Каждый день с Кораном — приближение к Раю.",
-    "Пусть завтра будет больше барракята в наших стараниях.",
-    "Давайте вместе укрепим нашу связь с Книгой Аллаха.",
-    "«Воистину, этим Кораном направляет Он, кого пожелает» (39:23).",
-    "С каждым аятом приближаемся к довольству Аллаха.",
-    "Завтра — ещё один шанс проявить усердие.",
-    "Коран — лучший друг и помощник в этом мире и в Ахира.",
-    "Кто читает Коран — наполняет сердце светом.",
-    "Аллах возвышает людей через Коран.",
-    "Усердие сегодня — награда в Судный день.",
-    "Слово Аллаха — лекарство для душ и сердец.",
-    "Не упускай возможность приблизиться к Аллаху через чтение.",
-    "Коран ведёт к счастью и спокойствию.",
-    "Пусть наши сердца будут мягкими благодаря Корану.",
-    "Аллах облегчит путь в Рай тем, кто учит Коран.",
-    "Каждое прочитанное слово — это награда.",
-    "Пусть Коран будет нашим заступником в Судный день.",
-    "Нет усталости, когда рядом Коран.",
-    "Аллах открывает пути тем, кто держится за Его Книгу.",
-    "Слова Аллаха сильнее любых трудностей.",
-    "Коран укрепляет иман и приносит спокойствие.",
-    "Каждый аят — обращение Всевышнего к тебе.",
-    "Аллах любит тех, кто очищает сердце Кораном.",
-    "Не позволяй дню пройти без аятов Корана.",
-    "Коран — источник силы и терпения.",
-    "В каждом дне найди минуту для Корана — и увидишь барракат.",
-]
-
+# === Вспомогательные функции времени ===
 def local_now() -> datetime:
-    """Текущее время по твоему смещению (UTC+OFFSET)."""
     return datetime.now(timezone.utc) + timedelta(hours=TIMEZONE_OFFSET)
 
 def next_time(hour: int, minute: int = 0) -> datetime:
-    """Ближайшее локальное время H:M от текущего момента."""
     now = local_now()
-    target = datetime(now.year, now.month, now.day, hour, minute, tzinfo=now.tzinfo)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if now >= target:
         target += timedelta(days=1)
     return target
 
-def rotation_index_for_day(d: datetime) -> int:
-    """Индекс мотивашки: стабильный по дню, идём по порядку, потом цикл."""
-    return d.toordinal() % len(MOTIVATIONS)
-
+# === Цикл мотивашек ===
 async def daily_motivation_loop():
-    """Каждый день в 22:00 по локальному смещению отправляем мотивашку №i."""
     while True:
         try:
-            target = next_time(22, 0)  # 22:00 локально
+            target = next_time(22, 0)
             sleep_sec = (target - local_now()).total_seconds()
-            logger.info(f"Следующая мотивация будет отправлена в {target}, через {sleep_sec} секунд")
-            
-            await asyncio.sleep(max(0, sleep_sec))
+            logger.info(f"Мотивация будет отправлена в {target}")
+            await asyncio.sleep(sleep_sec)
 
-            idx = rotation_index_for_day(local_now())
-            text = MOTIVATIONS[idx]
-            
-            await bot.send_message(GROUP_ID, text)
-            logger.info(f"Отправлена мотивация #{idx+1}")
-            
-            # Ждём до следующего дня
-            await asyncio.sleep(60)  # небольшая задержка перед следующей проверкой
+            motivations = await load_blocks_from_url(MOTIVATIONS_URL)
+            if motivations:
+                text = "Сегодня не все отметились.\n" + random.choice(motivations)
+                await bot.send_message(GROUP_ID, text)
         except Exception as e:
-            logger.error(f"Ошибка в цикле мотивации: {e}")
-            await asyncio.sleep(3600)  # ждём час при ошибке
+            logger.error(f"Ошибка в daily_motivation_loop: {e}")
+        await asyncio.sleep(60)
 
-# ── Обработка команды /start ───────────────────
+# === Цикл напоминания о посте (ср/вс) ===
+POST_REMINDERS = [
+    "Завтра — день желательного поста (понедельник), не забудьте, ин шаа Аллах!",
+    "Пусть завтра Всевышний даст силы держать пост. Это сунна!",
+    "Кто постится по понедельникам и четвергам — следует Сунне Пророка ﷺ. Не забудь про завтрашний пост!"
+]
+
+async def fasting_reminder_loop():
+    while True:
+        try:
+            target = next_time(21, 0)
+            sleep_sec = (target - local_now()).total_seconds()
+            await asyncio.sleep(sleep_sec)
+
+            weekday = local_now().weekday()
+            if weekday in [1, 6]:  # вторник (перед ср) и воскресенье
+                reminder = random.choice(POST_REMINDERS)
+                await bot.send_message(GROUP_ID, reminder)
+        except Exception as e:
+            logger.error(f"Ошибка в fasting_reminder_loop: {e}")
+        await asyncio.sleep(60)
+
+# === Обработка /start в ЛС ===
 @dp.message(F.chat.type == "private", F.text == "/start")
 async def start_command(message: Message):
-    await message.answer("Ассаламу алейкум! Я бот для напоминаний о чтении Корана.")
+    await message.answer("Ассаламу алейкум! Я бот напоминалка о Коране.")
 
-# ── Запуск ─────────────────────────────────────
-async def main():
-    logger.info("Запуск бота...")
-    # Планировщик мотивашек
-    asyncio.create_task(daily_motivation_loop())
-    # Старт поллинга
-    await dp.start_polling(bot)
-
-# == HTTP-сервер для Render, чтобы бот не засыпал ==
-from aiohttp import web  # убедись, что импорт есть выше, либо вставь здесь
-
+# === HTTP-сервер для Render — чтобы бот не засыпал ===
 async def handle(request):
     return web.Response(text="Bot is alive")
 
@@ -135,15 +124,16 @@ async def start_web():
     site = web.TCPSite(runner, port=int(os.environ.get("PORT", 8080)))
     await site.start()
 
-# == Основной запуск ==
+# === Основной запуск ===
 async def main():
-    await start_web()              # запуск веб-сервера
-    await dp.start_polling(bot)   # запуск бота
+    logger.info("Бот запускается...")
+    await start_web()
+    asyncio.create_task(daily_motivation_loop())
+    asyncio.create_task(fasting_reminder_loop())
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         logger.info("Бот остановлен")
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
