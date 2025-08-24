@@ -85,7 +85,7 @@ async def daily_motivation_loop():
 
 # === Цикл напоминания о посте (ср/вс) ===
 POST_REMINDERS = [
-    "Завтра — день желательного поста (понедельник), не забудьте, ин шаа Аллах!",
+    "Завтра — день желательного поста, не забудьте, ин шаа Аллах!",
     "Пусть завтра Всевышний даст силы держать пост. Это сунна!",
     "Кто постится по понедельникам и четвергам — следует Сунне Пророка ﷺ. Не забудь про завтрашний пост!"
 ]
@@ -98,7 +98,7 @@ async def fasting_reminder_loop():
             await asyncio.sleep(sleep_sec)
 
             weekday = local_now().weekday()
-            if weekday in [1, 6]:  # вторник (перед ср) и воскресенье
+            if weekday in [2, 6]:  # среда и воскресенье
                 reminder = random.choice(POST_REMINDERS)
                 await bot.send_message(GROUP_ID, reminder)
         except Exception as e:
